@@ -1,0 +1,190 @@
+<!doctype html>
+<html>
+<head>
+<link rel="stylesheet" href="jquery-ui.min.css">
+<script src="jquery.js"></script>
+<script src="jquery-ui.min.js"></script>
+ <style>
+ul { list-style-type: none; margin: 0; padding: 20px; margin-bottom: 10px; }
+li { margin: 5px; padding: 5px; width: 150px; }
+.playerFree {border : 1px dotted red;}
+.playerForSale {border : 1px dotted blue;}
+.playerNotForSale {color : red;}
+.playerCart { border : 1px solid green;}
+#cart .ui-selected { background: #F39814; color: white; }
+</style>
+</head>
+<body>
+
+<select id="clubSelect"></select>
+
+<ul id="playersList"></ul>
+
+<div id="cart">
+<form action='postSelection.php' method='post'>
+<h1>Selection</h1>
+<div>
+<ul>
+<li class="placeholder">Faites glisser vos choix ici</li>
+</ul>
+</div>
+<input type='submit' value='Enregistrer mes choix' />
+</form>
+</div>
+<div id="budget">
+	<h1>Budget</h1>
+	<p>Masse salariale disponible : <span></span> Ka</p>
+	<p>Budget transfert restant : <span></span> Ka</p>
+</div>
+<script>
+	var $serverSal;
+	var $serverTrans;
+	var $currentSal;
+	var $currentTrans;
+	var $currentCart;
+	
+	function initCart() {
+		$currentCart = $('.playerCart');
+	}
+	
+	function updateBudget() {
+		if ($currentCart == null)
+		{
+			initCart();
+		}
+		$currentSal = $serverSal;
+		$currentTrans = $serverTrans;
+		$.each($currentCart, function (index,value) {
+			$currentSal -= $(value).data('json').salary.toFixed(1);
+			//$currentTrans -= $(value).data('json').prize;
+			var prize =$(value).find('.spinnerInput').spinner('value');
+			console.log(prize);
+			$currentTrans -= prize.toFixed(1);
+		});
+		$('#budget span:first').text($currentSal.toFixed(1));
+		$('#budget span:last').text($currentTrans.toFixed(1));
+		$('form :submit').trigger('budgetChanged');
+	}
+
+function updateDynamicBudget(event,ui) {
+	updateBudget();
+}
+
+function updateMarketAndBudget(event,ui) {
+	updateBudget();
+	updateMarket();
+}
+
+function updateMarket(){
+		$.each($('.playerFree').not('.ui-draggable-dragging'),function(index,value) {
+			if (($(value).data('json').salary > $currentSal) || ($(value).data('json').prize > $currentTrans)){
+				$(value).draggable('disable');
+			} else {
+				console.log('Enable on '+$(value).data('json').name);
+				$(value).draggable('enable');
+			}
+		});
+		$.each($('.playerForSale').not('.ui-draggable-dragging'),function(index,value) {
+			if (($(value).data('json').salary > $currentSal) || ($(value).data('json').prize > $currentTrans)){
+				$(value).draggable('disable');
+			} else {
+				$(value).draggable('enable');
+			}
+		});
+	}
+
+$( document ).ready(function() {
+	
+	var $clubSelect = $('#clubSelect');
+	
+	//$( "ul, li" ).disableSelection();
+
+	var $jsonData;
+	$.getJSON("clubs.php", function( resp ) {
+		$.each(resp, function (index,value) {
+			$clubSelect.append($('<option>').text(value.name).attr('value',index));
+		});
+		$jsonData = resp;
+		loadPlayers(0);
+	});
+	
+	$.getJSON("franchises.php", function( resp ) {
+		$serverSal = resp.salary;
+		$serverTrans = resp.budget;
+		// Initialise les champs.
+		updateBudget();
+	});
+	
+	$clubSelect.on('change', function() {
+		loadPlayers(this.value);
+		updateMarket();
+	});
+	
+	function loadPlayers(idx) {
+		$('#playersList').empty();
+		var $players = $jsonData[idx].players;
+		$.each($players,function (index,value) {
+			var $addedLi = $('<li>').text(value.name).data('json',value).appendTo('#playersList');
+			if (value.prize < 0) {
+				$addedLi.addClass('playerNotForSale');
+			}
+			else if (value.prize == 0) {
+				$addedLi.addClass('playerFree');
+			} else {
+				$addedLi.addClass('playerForSale');
+			}
+		});
+		$(".playerForSale").draggable({ scroll:true, revert: 'invalid', helper: "clone" });
+		$(".playerFree").draggable({ scroll:true, revert: 'invalid', helper: "clone" });
+	};
+	
+	 $( "#cart ul" ).droppable({
+			activeClass: "ui-state-default",
+			hoverClass: "ui-state-hover",
+			accept: ".playerFree,.playerForSale",
+			drop: function( event, ui ) {
+				$( this ).find( ".placeholder" ).remove();
+				$( this ).append(
+					$('<div>').attr('id','playerCart'+ui.draggable.data('json').ido).addClass('playerCart').data('json',ui.draggable.data('json')).append(
+						$('<p>').text(ui.draggable.text()+' - '+ui.draggable.data('json').salary)
+						).append('<input type=\'hidden\' name=\'selectedPlayerId[]\' value=\''+ui.draggable.data('json').ido+'\'/>')
+						.append(
+							$('<input>')
+								.addClass('spinnerInput')
+								.attr('name','amountForIdo'+ui.draggable.data('json').ido)
+								.attr('value',ui.draggable.data('json').prize)
+								.attr('id','amountForIdo'+ui.draggable.data('json').ido)
+						)
+						.append($('<a>').text('X').data('ido',ui.draggable.data('json').ido).attr('href','#').click(function() {
+							$('#playerCart'+$(this).data('ido')).remove();
+							initCart();
+							updateBudget();
+							updateMarket();
+						}))
+					);
+				$('#amountForIdo'+ui.draggable.data('json').ido).spinner({
+					step:0.1,
+					numberFormat:'n',
+					min:ui.draggable.data('json').prize,
+					max:$serverTrans,
+					stop: updateDynamicBudget,
+					change:updateMarketAndBudget
+					});
+				initCart();
+				updateBudget();
+				updateMarket();
+			}
+		});
+	$('form :submit').bind('budgetChanged',function() {
+		if ($currentTrans < 0) {
+			$(this).attr('disabled', 'disabled');
+		} else {
+			$(this).removeAttr('disabled');
+		}
+	});
+});
+
+</script>
+
+</body>
+</html>
